@@ -150,6 +150,20 @@ class OutputProcessor:
         return random.uniform(0.7, 1.3)
 
     @staticmethod
+    def _get_platform_name(event: AstrMessageEvent) -> str:
+        """从 unified_msg_origin 中解析平台名，格式通常为 platform:message_type:session_id。"""
+        umo = getattr(event, "unified_msg_origin", "") or ""
+        if ":" not in umo:
+            return ""
+        return umo.split(":", 1)[0].strip().lower()
+
+    def _supports_forward_nodes(self, event: AstrMessageEvent) -> bool:
+        """仅在明确支持的平台上启用 Nodes/合并转发。"""
+        platform_name = self._get_platform_name(event)
+        # AstrBot 文档当前仅明确声明 OneBot v11（aiocqhttp）支持该类型。
+        return platform_name == "aiocqhttp"
+
+    @staticmethod
     def _should_show_mode(
         mode: str,
         output_modes: list,
@@ -193,7 +207,7 @@ class OutputProcessor:
         output_config = self.config.get("output_config", {})
         output_modes = output_config.get("output_modes", ["full_text", "txt_file"])
         max_length = output_config.get("max_text_length", 1000)
-        merge_forward_enabled = output_config.get("merge_forward_enabled", True)
+        merge_forward_enabled = output_config.get("merge_forward_enabled", False)
         smart_trigger_ai_summary = output_config.get("smart_trigger_ai_summary", True)
         smart_trigger_txt_file = output_config.get("smart_trigger_txt_file", True)
         smart_trigger_long_image = output_config.get("smart_trigger_long_image", True)
@@ -216,7 +230,7 @@ class OutputProcessor:
         final_text = "\n".join(text_lines).strip()
 
         if not final_text:
-            return [Plain("OpenCode 执行完毕，无输出。")]
+            return [[Plain("OpenCode 执行完毕，无输出。")]]
 
         is_long = len(final_text) > max_length
 
@@ -293,6 +307,7 @@ class OutputProcessor:
         # === 2. 调度逻辑 ===
         valid_block_keys = [k for k in blocks.keys() if blocks[k]]
         count = len(valid_block_keys)
+        supports_forward_nodes = self._supports_forward_nodes(event)
         ordered_keys = [
             "ai_summary",
             "last_line",
@@ -301,11 +316,29 @@ class OutputProcessor:
             "full_text",
         ]
 
+        def make_sequential_plan() -> List[List]:
+            """按平台兼容方式逐条发送，避免不支持 Nodes 的适配器丢消息。"""
+            send_plan: List[List] = []
+            for key in ordered_keys:
+                if key not in blocks:
+                    continue
+                if key == "full_text":
+                    for part in blocks["full_text"]:
+                        send_plan.append([part])
+                else:
+                    send_plan.append([blocks[key]])
+            return send_plan
+
         # 辅助函数：构造合并转发节点
         def make_node(content_list):
             uin = event.get_self_id()
             name = "OpenCode"
             return Node(uin=uin, name=name, content=content_list)
+
+        if not supports_forward_nodes:
+            send_plan = make_sequential_plan()
+            if send_plan:
+                return send_plan
 
         # Case A: merge 开启，沿用原有的合并转发主路径
         if merge_forward_enabled and count > 1:
@@ -344,19 +377,7 @@ class OutputProcessor:
 
         # Case C: merge 关闭 -> 顺序逐条发；full_text 单独一次合并转发
         if not merge_forward_enabled:
-            send_plan: List[List] = []
-
-            for key in ordered_keys:
-                if key not in blocks or key == "full_text":
-                    continue
-                send_plan.append([blocks[key]])
-
-            if "full_text" in blocks:
-                forward_nodes = Nodes([])
-                for p in blocks["full_text"]:
-                    forward_nodes.nodes.append(make_node([p]))
-                send_plan.append([forward_nodes])
-
+            send_plan = make_sequential_plan()
             if send_plan:
                 return send_plan
 
