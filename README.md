@@ -83,8 +83,8 @@
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| `output_modes` | 输出方式 (多选) | `full_text`, `txt_file` |
-| `merge_forward_enabled` | 是否启用合并转发发送 | `true` |
+| `output_modes` | 输出方式 (多选) | `ai_summary`, `txt_file`, `long_image`, `full_text` |
+| `merge_forward_enabled` | 是否启用合并转发发送 | `false` |
 | `max_text_length` | 长文本阈值 | `1000` |
 | `smart_trigger_ai_summary` | ai_summary 是否按阈值智能触发 | `true` |
 | `smart_trigger_txt_file` | txt_file 是否按阈值智能触发 | `true` |
@@ -98,8 +98,8 @@
 - `full_text`: 全量文本（超阈值按 `max_text_length` 自动切分）
 
 **发送与智能触发规则**:
-- `merge_forward_enabled=true`：按顺序将命中的积木合并转发发送。
-- `merge_forward_enabled=false`：按顺序逐条发送命中的积木；`full_text` 会单独使用一次合并转发发送，避免长文刷屏。
+- `merge_forward_enabled=true`：仅在明确支持合并转发的平台上启用（当前建议仅 OneBot v11/`aiocqhttp`）；其他平台会自动回退为逐条发送。
+- `merge_forward_enabled=false`：按顺序逐条发送所有命中的积木。
 - 对 `ai_summary` / `txt_file` / `long_image`：
   - 对应 `smart_trigger_xxx=true` 时，仅当输出长度超过 `max_text_length` 且积木被勾选才出现；
   - 对应 `smart_trigger_xxx=false` 时，只要积木被勾选就总是出现。
